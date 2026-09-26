@@ -8,7 +8,6 @@ import {
   KeyRound, 
   Mail, 
   User, 
-  AlertCircle, 
   CheckCircle2, 
   RefreshCw,
   Hash
@@ -19,13 +18,11 @@ export default function Login() {
   const navigate = useNavigate();
   const { 
     signInWithEmail, 
-    signUpWithEmail, 
     sendDigitOtp,
     verifyDigitOtp,
     signInWithGoogle, 
     sendPasswordReset, 
     collegeDomain, 
-    isFirebaseReady,
     user
   } = useAuth();
 
@@ -36,14 +33,15 @@ export default function Login() {
     }
   }, [user, navigate]);
 
-  const [authMethod, setAuthMethod] = useState<'otp' | 'password'>('otp');
-  const [passwordMode, setPasswordMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
-  
+  // Clean 2-Way Slidebar Option: 'signin' | 'register'
+  const [tab, setTab] = useState<'signin' | 'register'>('signin');
+  const [isForgot, setIsForgot] = useState(false);
+
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   
-  // 6-Digit OTP State
+  // 6-Digit OTP State for Registration
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
   const [otpSent, setOtpSent] = useState(false);
   const [cooldown, setCooldown] = useState(0);
@@ -70,15 +68,14 @@ export default function Login() {
 
   // Handle digit input change
   const handleDigitChange = (index: number, value: string) => {
-    // Only accept numeric digits
     const cleaned = value.replace(/[^0-9]/g, '');
     if (!cleaned && value !== '') return;
 
     const newDigits = [...otpDigits];
-    newDigits[index] = cleaned.slice(-1); // Take last character entered
+    newDigits[index] = cleaned.slice(-1);
     setOtpDigits(newDigits);
 
-    // Auto-advance focus to next input
+    // Auto-advance to next box
     if (cleaned && index < 5 && inputRefs.current[index + 1]) {
       inputRefs.current[index + 1]?.focus();
     }
@@ -94,7 +91,6 @@ export default function Login() {
   const handleDigitKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Backspace') {
       if (!otpDigits[index] && index > 0 && inputRefs.current[index - 1]) {
-        // Move to previous and clear it
         const newDigits = [...otpDigits];
         newDigits[index - 1] = '';
         setOtpDigits(newDigits);
@@ -123,13 +119,18 @@ export default function Login() {
     }
   };
 
-  // Dispatch 6-Digit OTP to college email
-  const handleSendOtp = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  // Step 1: Send 6-Digit OTP for Registration
+  const handleSendRegisterOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
 
     if (!cleanEmail.endsWith(`@${collegeDomain.toLowerCase()}`)) {
       toast.error(`Institutional access only. Email must end with @${collegeDomain}`);
+      return;
+    }
+
+    if (!name.trim()) {
+      toast.error('Please enter your full name.');
       return;
     }
 
@@ -139,7 +140,7 @@ export default function Login() {
       setOtpSent(true);
       setCooldown(30);
       setOtpDigits(['', '', '', '', '', '']);
-      toast.success('6-digit code dispatched to your college inbox!');
+      toast.success('6-digit verification code dispatched to your college inbox!');
     } catch (error: any) {
       console.error('OTP send error:', error);
       toast.error(error.message || 'Failed to dispatch verification code.');
@@ -148,7 +149,7 @@ export default function Login() {
     }
   };
 
-  // Verify 6-digit code
+  // Step 2: Verify 6-Digit OTP and Complete Registration
   const handleVerifyOtp = async (codeToVerify?: string) => {
     const code = codeToVerify || otpDigits.join('');
     if (code.length !== 6) {
@@ -158,8 +159,8 @@ export default function Login() {
 
     setLoading(true);
     try {
-      await verifyDigitOtp(email.trim().toLowerCase(), code, name);
-      toast.success('Verification successful! Welcome to UniMart.');
+      await verifyDigitOtp(email.trim().toLowerCase(), code, name, password);
+      toast.success('Registration successful! Welcome to UniMart.');
       navigate('/');
     } catch (error: any) {
       console.error('OTP verification error:', error);
@@ -169,7 +170,8 @@ export default function Login() {
     }
   };
 
-  const handlePasswordSubmit = async (e: React.FormEvent) => {
+  // Sign In Flow (Email & Password)
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
 
@@ -180,37 +182,23 @@ export default function Login() {
 
     setLoading(true);
     try {
-      if (passwordMode === 'signup') {
-        if (!name.trim()) {
-          toast.error('Please enter your full name.');
-          setLoading(false);
-          return;
-        }
-        await signUpWithEmail(cleanEmail, password, name);
-        toast.success('Single student account registered! Welcome to UniMart.');
-        navigate('/');
-      } else if (passwordMode === 'signin') {
+      if (isForgot) {
+        await sendPasswordReset(cleanEmail);
+        toast.success('Password reset link sent to your college inbox!');
+        setIsForgot(false);
+      } else {
         await signInWithEmail(cleanEmail, password);
         toast.success('Welcome back to UniMart!');
         navigate('/');
-      } else if (passwordMode === 'forgot') {
-        await sendPasswordReset(cleanEmail);
-        toast.success('Password reset link sent to your college inbox!');
-        setPasswordMode('signin');
       }
     } catch (error: any) {
       console.error('Auth error:', error);
       const code = error.code;
-      if (code === 'auth/email-already-in-use') {
-        toast.error('An account already exists for this email. Please sign in.');
-        setPasswordMode('signin');
-      } else if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
+      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
         toast.error('Invalid credentials. Check your password or reset it.');
       } else if (code === 'auth/user-not-found') {
-        toast.error('No account found for this institutional email. Register below.');
-        setPasswordMode('signup');
-      } else if (code === 'auth/weak-password') {
-        toast.error('Password must be at least 6 characters.');
+        toast.error('No account found for this institutional email. Please register.');
+        setTab('register');
       } else {
         toast.error(error.message || 'Authentication error.');
       }
@@ -219,6 +207,7 @@ export default function Login() {
     }
   };
 
+  // 1-Click Institutional Google SSO
   const handleGoogleSignIn = async () => {
     setLoading(true);
     try {
@@ -255,73 +244,58 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Configuration Notice if Firebase Keys Missing */}
-        {!isFirebaseReady && (
-          <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4 text-left flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-            <div className="text-xs text-amber-200 space-y-1">
-              <p className="font-semibold text-white">Firebase Setup Notice</p>
-              <p className="text-amber-300/80 leading-relaxed">
-                Connect your Firebase project credentials in <code className="bg-black/50 px-1 py-0.5 rounded text-white">.env</code> to activate cloud user sessions.
-              </p>
-            </div>
-          </div>
-        )}
-        
         {/* Luxury Authentication Chassis */}
         <div className="luxury-surface rounded-3xl p-7 sm:p-8 text-left space-y-6">
           
-          {/* Header & Primary Authentication Method Switcher */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-white tracking-tight">
-                  {authMethod === 'otp' && (otpSent ? 'Confirm 6-Digit Code' : '6-Digit One-Time Password')}
-                  {authMethod === 'password' && (passwordMode === 'signin' ? 'Password Sign In' : passwordMode === 'signup' ? 'Register Account' : 'Reset Password')}
-                </h2>
-                <p className="text-xs text-zinc-400 tracking-tight">
-                  {authMethod === 'otp' 
-                    ? (otpSent ? 'Enter the digits sent to your college mail.' : '6-digit confirmation code sent to your institutional email.')
-                    : 'Institutional credentials with single student account policy.'}
-                </p>
-              </div>
+          {/* Top Clean Slidebar Segmented Switcher: Sign In vs Register */}
+          <div className="grid grid-cols-2 p-1 rounded-2xl bg-[#09090b] border border-white/[0.08] luxury-inset-sm">
+            <button
+              type="button"
+              onClick={() => { setTab('signin'); setOtpSent(false); setIsForgot(false); }}
+              className={`py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 ${
+                tab === 'signin'
+                  ? 'bg-white text-black shadow-sm'
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              <span>Sign In</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setTab('register'); setOtpSent(false); setIsForgot(false); }}
+              className={`py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 ${
+                tab === 'register'
+                  ? 'bg-white text-black shadow-sm'
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              <span>Register</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30">OTP</span>
+            </button>
+          </div>
 
-              {/* Method Switcher Pills */}
-              <div className="flex rounded-xl p-1 bg-black/40 border border-white/[0.08]">
-                <button
-                  type="button"
-                  onClick={() => { setAuthMethod('otp'); setOtpSent(false); }}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                    authMethod === 'otp' 
-                      ? 'bg-white text-black shadow-sm' 
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  6-Digit OTP
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAuthMethod('password')}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                    authMethod === 'password' 
-                      ? 'bg-white text-black shadow-sm' 
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  Password
-                </button>
-              </div>
-            </div>
+          {/* Section Header */}
+          <div className="space-y-1">
+            <h2 className="text-lg font-bold text-white tracking-tight">
+              {tab === 'signin' && (isForgot ? 'Reset Password' : 'Sign in to UniMart')}
+              {tab === 'register' && (otpSent ? 'Confirm 6-Digit Code' : 'Register with College Email')}
+            </h2>
+            <p className="text-xs text-zinc-400 tracking-tight">
+              {tab === 'signin' && (isForgot ? 'Enter your institutional email to recover access.' : 'Access your verified student account.')}
+              {tab === 'register' && (otpSent ? 'Enter the digits sent to your college inbox.' : 'One verified account per student. 6-digit OTP will be sent to your mail.')}
+            </p>
 
-            {/* Strict Domain Indicator */}
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[11px] font-mono text-zinc-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span>Institutional Domain:</span>
-              <span className="text-zinc-200 font-semibold">@{collegeDomain}</span>
+            {/* Institutional Domain Tag */}
+            <div className="pt-1.5">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[11px] font-mono text-zinc-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span>Domain:</span>
+                <span className="text-zinc-200 font-semibold">@{collegeDomain}</span>
+              </span>
             </div>
           </div>
 
-          {/* 1-Click Institutional Google Workspace Auth */}
+          {/* 1-Click Institutional Google SSO */}
           {!otpSent && (
             <div>
               <button
@@ -344,18 +318,20 @@ export default function Login() {
                   <div className="w-full border-t border-white/[0.08]" />
                 </div>
                 <div className="relative flex justify-center text-[10px] uppercase font-mono tracking-widest text-zinc-500">
-                  <span className="bg-[#09090b] px-3">or institutional 6-digit verification</span>
+                  <span className="bg-[#09090b] px-3">
+                    {tab === 'register' ? 'or 6-digit email otp registration' : 'or institutional credentials'}
+                  </span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* METHOD 1: 6-DIGIT NUMERIC OTP FLOW */}
-          {authMethod === 'otp' && (
+          {/* TAB 1: REGISTER WITH PRIMARY 6-DIGIT OTP */}
+          {tab === 'register' && (
             <div>
               {!otpSent ? (
-                /* Step 1: Enter Email & Request 6 Digits */
-                <form onSubmit={handleSendOtp} className="space-y-4">
+                /* Step 1: Input details & send 6-digit OTP */
+                <form onSubmit={handleSendRegisterOtp} className="space-y-4">
                   <div>
                     <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1.5 font-mono">
                       Student Name
@@ -367,6 +343,7 @@ export default function Login() {
                         placeholder="e.g. Rahul Sharma" 
                         value={name}
                         onChange={(e) => setName(e.target.value)}
+                        required
                         className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
                       />
                     </div>
@@ -398,27 +375,45 @@ export default function Login() {
                     </div>
                   </div>
 
+                  <div>
+                    <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1.5 font-mono">
+                      Create Password (Optional)
+                    </label>
+                    <div className="relative flex items-center">
+                      <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5" />
+                      <input 
+                        type="password" 
+                        placeholder="•••••••• (optional)" 
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        minLength={6}
+                        className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
+                      />
+                    </div>
+                    <p className="text-[10px] text-zinc-500 mt-1">You can set a password now, or use 6-digit OTP anytime to sign in.</p>
+                  </div>
+
                   <button 
                     type="submit" 
                     className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50 mt-2" 
-                    disabled={loading || !isEmailValidDomain || !email}
+                    disabled={loading || !isEmailValidDomain || !email || !name.trim()}
                   >
                     {loading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin text-black" />
-                        <span>Dispatching 6-Digit Code...</span>
+                        <span>Sending 6-Digit Code...</span>
                       </>
                     ) : (
                       <>
                         <Hash className="w-3.5 h-3.5" />
-                        <span>Send 6-Digit Code</span>
+                        <span>Send 6-Digit Code to Mail</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </>
                     )}
                   </button>
                 </form>
               ) : (
-                /* Step 2: 6-Box Digit Input Screen */
+                /* Step 2: 6-Box Numeric Input */
                 <div className="space-y-6 text-center">
                   <div className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-white/[0.1] flex items-center justify-center mx-auto text-emerald-400">
                     <Hash className="w-6 h-6" />
@@ -426,7 +421,7 @@ export default function Login() {
 
                   <div className="space-y-1">
                     <p className="text-xs text-zinc-400">
-                      Enter the 6-digit confirmation code sent to:
+                      Enter the 6-digit code sent to your email:
                       <br />
                       <span className="font-mono text-zinc-200 font-semibold">{email}</span>
                     </p>
@@ -468,7 +463,7 @@ export default function Login() {
                     ) : (
                       <>
                         <CheckCircle2 className="w-4 h-4" />
-                        <span>Verify & Sign In</span>
+                        <span>Verify & Create Single Account</span>
                       </>
                     )}
                   </button>
@@ -484,7 +479,7 @@ export default function Login() {
 
                     <button
                       type="button"
-                      onClick={() => handleSendOtp()}
+                      onClick={(e) => handleSendRegisterOtp(e)}
                       disabled={cooldown > 0 || loading}
                       className="text-xs text-zinc-400 hover:text-white transition-colors inline-flex items-center gap-1.5 disabled:opacity-40"
                     >
@@ -497,57 +492,10 @@ export default function Login() {
             </div>
           )}
 
-          {/* METHOD 2: PASSWORD AUTHENTICATION FLOW */}
-          {authMethod === 'password' && (
+          {/* TAB 2: SIGN IN FLOW */}
+          {tab === 'signin' && (
             <div>
-              {passwordMode !== 'forgot' && (
-                <div className="flex items-center justify-center gap-3 mb-4 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setPasswordMode('signin')}
-                    className={`font-semibold pb-1 border-b-2 transition-all ${
-                      passwordMode === 'signin' 
-                        ? 'border-white text-white' 
-                        : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                    }`}
-                  >
-                    Sign In
-                  </button>
-                  <span className="text-zinc-700">·</span>
-                  <button
-                    type="button"
-                    onClick={() => setPasswordMode('signup')}
-                    className={`font-semibold pb-1 border-b-2 transition-all ${
-                      passwordMode === 'signup' 
-                        ? 'border-white text-white' 
-                        : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                    }`}
-                  >
-                    Register Single Account
-                  </button>
-                </div>
-              )}
-
-              <form onSubmit={handlePasswordSubmit} className="space-y-4">
-                {passwordMode === 'signup' && (
-                  <div>
-                    <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1.5 font-mono">
-                      Full Name
-                    </label>
-                    <div className="relative flex items-center">
-                      <User className="w-4 h-4 text-zinc-500 absolute left-3.5" />
-                      <input 
-                        type="text" 
-                        placeholder="e.g. Rahul Sharma" 
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        required
-                        className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
-                      />
-                    </div>
-                  </div>
-                )}
-
+              <form onSubmit={handleSignIn} className="space-y-4">
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider font-mono">
@@ -574,21 +522,19 @@ export default function Login() {
                   </div>
                 </div>
 
-                {passwordMode !== 'forgot' && (
+                {!isForgot && (
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider font-mono">
                         Password
                       </label>
-                      {passwordMode === 'signin' && (
-                        <button
-                          type="button"
-                          onClick={() => setPasswordMode('forgot')}
-                          className="text-[10px] text-zinc-400 hover:text-white transition-colors"
-                        >
-                          Forgot password?
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIsForgot(true)}
+                        className="text-[10px] text-zinc-400 hover:text-white transition-colors"
+                      >
+                        Forgot password?
+                      </button>
                     </div>
                     <div className="relative flex items-center">
                       <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5" />
@@ -598,7 +544,6 @@ export default function Login() {
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         required
-                        minLength={6}
                         className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
                       />
                     </div>
@@ -608,7 +553,7 @@ export default function Login() {
                 <button 
                   type="submit" 
                   className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50 mt-2" 
-                  disabled={loading || !isEmailValidDomain}
+                  disabled={loading || !isEmailValidDomain || !email}
                 >
                   {loading ? (
                     <>
@@ -617,22 +562,18 @@ export default function Login() {
                     </>
                   ) : (
                     <>
-                      <span>
-                        {passwordMode === 'signin' && 'Sign In to Campus Exchange'}
-                        {passwordMode === 'signup' && 'Register Single Student Account'}
-                        {passwordMode === 'forgot' && 'Send Password Reset Link'}
-                      </span>
+                      <span>{isForgot ? 'Send Password Reset Link' : 'Sign In to Campus Exchange'}</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </>
                   )}
                 </button>
               </form>
 
-              {passwordMode === 'forgot' && (
+              {isForgot && (
                 <div className="text-center pt-2">
                   <button
                     type="button"
-                    onClick={() => setPasswordMode('signin')}
+                    onClick={() => setIsForgot(false)}
                     className="text-xs text-zinc-400 hover:text-white transition-colors"
                   >
                     ← Back to Sign In
@@ -642,10 +583,11 @@ export default function Login() {
             </div>
           )}
 
+          {/* Institutional Single Account Badge */}
           <div className="pt-4 border-t border-white/[0.08] flex items-center gap-2 text-[11px] text-zinc-400 justify-center">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="tracking-tight">
-              One account per @{collegeDomain} student
+              One verified account per @{collegeDomain} student
             </span>
           </div>
         </div>
