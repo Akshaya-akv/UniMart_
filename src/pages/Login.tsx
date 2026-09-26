@@ -10,7 +10,11 @@ import {
   User, 
   CheckCircle2, 
   RefreshCw,
-  Hash
+  Hash,
+  Lock,
+  Eye,
+  EyeOff,
+  AlertCircle
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -18,6 +22,7 @@ export default function Login() {
   const navigate = useNavigate();
   const { 
     signInWithEmail, 
+    signUpWithEmail,
     sendDigitOtp,
     verifyDigitOtp,
     signInWithGoogle, 
@@ -37,11 +42,18 @@ export default function Login() {
   const [tab, setTab] = useState<'signin' | 'register'>('signin');
   const [isForgot, setIsForgot] = useState(false);
 
+  // Form Fields
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   
-  // 6-Digit OTP State for Registration
+  // Password Visibility Toggles
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // 6-Digit OTP Alternative State
+  const [useOtpFlow, setUseOtpFlow] = useState(false);
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
   const [otpSent, setOtpSent] = useState(false);
   const [cooldown, setCooldown] = useState(0);
@@ -50,6 +62,8 @@ export default function Login() {
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const isEmailValidDomain = !email || email.toLowerCase().trim().endsWith(`@${collegeDomain.toLowerCase()}`);
+  const isPasswordValid = password.length >= 6;
+  const doPasswordsMatch = password === confirmPassword;
 
   // Resend cooldown timer
   useEffect(() => {
@@ -119,9 +133,59 @@ export default function Login() {
     }
   };
 
-  // Step 1: Send 6-Digit OTP for Registration
-  const handleSendRegisterOtp = async (e: React.FormEvent) => {
+  // Primary Register Flow with Mandatory Password
+  const handleRegisterWithPassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!name.trim()) {
+      toast.error('Please enter your full name.');
+      return;
+    }
+
+    if (!cleanEmail.endsWith(`@${collegeDomain.toLowerCase()}`)) {
+      toast.error(`Institutional access only. Email must end with @${collegeDomain}`);
+      return;
+    }
+
+    if (!password) {
+      toast.error('Password is mandatory for creating an account.');
+      return;
+    }
+
+    if (password.length < 6) {
+      toast.error('Password must be at least 6 characters long.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      toast.error('Passwords do not match. Please verify your confirm password.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await signUpWithEmail(cleanEmail, password, name.trim());
+      toast.success('Account successfully registered! Welcome to UniMart.');
+      navigate('/');
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      if (error.code === 'auth/email-already-in-use') {
+        toast.error('An account already exists for this Amrita student email. Switched to Sign In.');
+        setTab('signin');
+      } else if (error.code === 'auth/weak-password') {
+        toast.error('Password is too weak. Please use at least 6 characters.');
+      } else {
+        toast.error(error.message || 'Failed to create student account.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Alternative Step 1: Send 6-Digit OTP for Registration
+  const handleSendRegisterOtp = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
 
     if (!cleanEmail.endsWith(`@${collegeDomain.toLowerCase()}`)) {
@@ -130,7 +194,7 @@ export default function Login() {
     }
 
     if (!name.trim()) {
-      toast.error('Please enter your full name.');
+      toast.error('Please enter your full name first.');
       return;
     }
 
@@ -140,16 +204,16 @@ export default function Login() {
       setOtpSent(true);
       setCooldown(30);
       setOtpDigits(['', '', '', '', '', '']);
-      toast.success('6-digit verification code dispatched to your college inbox!');
+      toast.success('6-digit code dispatched! Check your college inbox (and Spam folder).');
     } catch (error: any) {
       console.error('OTP send error:', error);
-      toast.error(error.message || 'Failed to dispatch verification code.');
+      toast.error(error.message || 'Email delivery delayed. We recommend creating an account with password above.');
     } finally {
       setLoading(false);
     }
   };
 
-  // Step 2: Verify 6-Digit OTP and Complete Registration
+  // Alternative Step 2: Verify 6-Digit OTP and Complete Registration
   const handleVerifyOtp = async (codeToVerify?: string) => {
     const code = codeToVerify || otpDigits.join('');
     if (code.length !== 6) {
@@ -160,7 +224,7 @@ export default function Login() {
     setLoading(true);
     try {
       await verifyDigitOtp(email.trim().toLowerCase(), code, name, password);
-      toast.success('Registration successful! Welcome to UniMart.');
+      toast.success('Verification successful! Welcome to UniMart.');
       navigate('/');
     } catch (error: any) {
       console.error('OTP verification error:', error);
@@ -251,7 +315,12 @@ export default function Login() {
           <div className="grid grid-cols-2 p-1 rounded-2xl bg-[#09090b] border border-white/[0.08] luxury-inset-sm">
             <button
               type="button"
-              onClick={() => { setTab('signin'); setOtpSent(false); setIsForgot(false); }}
+              onClick={() => { 
+                setTab('signin'); 
+                setUseOtpFlow(false); 
+                setOtpSent(false); 
+                setIsForgot(false); 
+              }}
               className={`py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 ${
                 tab === 'signin'
                   ? 'bg-white text-black shadow-sm'
@@ -262,7 +331,12 @@ export default function Login() {
             </button>
             <button
               type="button"
-              onClick={() => { setTab('register'); setOtpSent(false); setIsForgot(false); }}
+              onClick={() => { 
+                setTab('register'); 
+                setUseOtpFlow(false); 
+                setOtpSent(false); 
+                setIsForgot(false); 
+              }}
               className={`py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 flex items-center justify-center gap-1.5 ${
                 tab === 'register'
                   ? 'bg-white text-black shadow-sm'
@@ -270,7 +344,7 @@ export default function Login() {
               }`}
             >
               <span>Register</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30">OTP</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30">New</span>
             </button>
           </div>
 
@@ -278,11 +352,11 @@ export default function Login() {
           <div className="space-y-1">
             <h2 className="text-lg font-bold text-white tracking-tight">
               {tab === 'signin' && (isForgot ? 'Reset Password' : 'Sign in to UniMart')}
-              {tab === 'register' && (otpSent ? 'Confirm 6-Digit Code' : 'Register with College Email')}
+              {tab === 'register' && (useOtpFlow ? (otpSent ? 'Confirm 6-Digit Code' : 'Verify via 6-Digit Code') : 'Create Student Account')}
             </h2>
             <p className="text-xs text-zinc-400 tracking-tight">
               {tab === 'signin' && (isForgot ? 'Enter your institutional email to recover access.' : 'Access your verified student account.')}
-              {tab === 'register' && (otpSent ? 'Enter the digits sent to your college inbox.' : 'One verified account per student. 6-digit OTP will be sent to your mail.')}
+              {tab === 'register' && (useOtpFlow ? (otpSent ? 'Enter the digits sent to your college inbox.' : 'Verify your Amrita email using a 6-digit code.') : 'One verified account per student. Password is required.')}
             </p>
 
             {/* Institutional Domain Tag */}
@@ -296,7 +370,7 @@ export default function Login() {
           </div>
 
           {/* 1-Click Institutional Google SSO */}
-          {!otpSent && (
+          {(!useOtpFlow || !otpSent) && (
             <div>
               <button
                 type="button"
@@ -319,22 +393,23 @@ export default function Login() {
                 </div>
                 <div className="relative flex justify-center text-[10px] uppercase font-mono tracking-widest text-zinc-500">
                   <span className="bg-[#09090b] px-3">
-                    {tab === 'register' ? 'or 6-digit email otp registration' : 'or institutional credentials'}
+                    {tab === 'register' ? 'or register with college email & password' : 'or student credentials'}
                   </span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* TAB 1: REGISTER WITH PRIMARY 6-DIGIT OTP */}
+          {/* TAB 1: REGISTER FLOW */}
           {tab === 'register' && (
             <div>
-              {!otpSent ? (
-                /* Step 1: Input details & send 6-digit OTP */
-                <form onSubmit={handleSendRegisterOtp} className="space-y-4">
+              {!useOtpFlow ? (
+                /* Primary Direct Registration with Mandatory Password */
+                <form onSubmit={handleRegisterWithPassword} className="space-y-4">
+                  {/* Student Full Name */}
                   <div>
                     <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1.5 font-mono">
-                      Student Name
+                      Student Full Name <span className="text-rose-400">*</span>
                     </label>
                     <div className="relative flex items-center">
                       <User className="w-4 h-4 text-zinc-500 absolute left-3.5" />
@@ -349,10 +424,11 @@ export default function Login() {
                     </div>
                   </div>
 
+                  {/* Institutional Email */}
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider font-mono">
-                        Institutional Email
+                        Institutional Email <span className="text-rose-400">*</span>
                       </label>
                       {!isEmailValidDomain && (
                         <span className="text-[10px] font-mono text-amber-400">
@@ -375,118 +451,265 @@ export default function Login() {
                     </div>
                   </div>
 
+                  {/* Mandatory Password */}
                   <div>
-                    <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1.5 font-mono">
-                      Create Password (Optional)
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider font-mono">
+                        Password (Mandatory) <span className="text-rose-400">*</span>
+                      </label>
+                      <span className={`text-[10px] font-mono ${password.length >= 6 ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                        {password.length > 0 && (password.length >= 6 ? '✓ Valid length' : 'Min 6 chars')}
+                      </span>
+                    </div>
+                    <div className="relative flex items-center">
+                      <Lock className="w-4 h-4 text-zinc-500 absolute left-3.5" />
+                      <input 
+                        type={showPassword ? 'text' : 'password'} 
+                        placeholder="At least 6 characters" 
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        minLength={6}
+                        className="w-full luxury-inset-sm rounded-xl pl-10 pr-10 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 text-zinc-500 hover:text-zinc-300 transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Mandatory Confirm Password */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider font-mono">
+                        Confirm Password <span className="text-rose-400">*</span>
+                      </label>
+                      {confirmPassword.length > 0 && (
+                        <span className={`text-[10px] font-mono ${doPasswordsMatch ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {doPasswordsMatch ? '✓ Passwords match' : '✕ Passwords do not match'}
+                        </span>
+                      )}
+                    </div>
                     <div className="relative flex items-center">
                       <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5" />
                       <input 
-                        type="password" 
-                        placeholder="•••••••• (optional)" 
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
+                        type={showConfirmPassword ? 'text' : 'password'} 
+                        placeholder="Re-enter your password" 
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        required
                         minLength={6}
-                        className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
+                        className={`w-full luxury-inset-sm rounded-xl pl-10 pr-10 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none tracking-tight transition-colors ${
+                          confirmPassword.length > 0 && !doPasswordsMatch ? 'border-rose-500/50' : 'focus:border-white/[0.3]'
+                        }`}
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 text-zinc-500 hover:text-zinc-300 transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
-                    <p className="text-[10px] text-zinc-500 mt-1">You can set a password now, or use 6-digit OTP anytime to sign in.</p>
                   </div>
 
+                  {/* Account Creation Action Button */}
                   <button 
                     type="submit" 
                     className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50 mt-2" 
-                    disabled={loading || !isEmailValidDomain || !email || !name.trim()}
+                    disabled={loading || !isEmailValidDomain || !email || !name.trim() || !isPasswordValid || !doPasswordsMatch}
                   >
                     {loading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin text-black" />
-                        <span>Sending 6-Digit Code...</span>
+                        <span>Creating Your Single Student Account...</span>
                       </>
                     ) : (
                       <>
-                        <Hash className="w-3.5 h-3.5" />
-                        <span>Send 6-Digit Code to Mail</span>
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>Create Single Student Account</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </>
                     )}
                   </button>
+
+                  {/* Switch to OTP flow if desired */}
+                  <div className="pt-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setUseOtpFlow(true)}
+                      className="text-[11px] text-zinc-400 hover:text-white transition-colors inline-flex items-center gap-1 font-mono"
+                    >
+                      <Hash className="w-3 h-3 text-emerald-400" />
+                      <span>Prefer 6-Digit Email OTP instead? Click here</span>
+                    </button>
+                  </div>
                 </form>
               ) : (
-                /* Step 2: 6-Box Numeric Input */
-                <div className="space-y-6 text-center">
-                  <div className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-white/[0.1] flex items-center justify-center mx-auto text-emerald-400">
-                    <Hash className="w-6 h-6" />
-                  </div>
+                /* Alternative 6-Digit OTP Mode */
+                <div>
+                  {!otpSent ? (
+                    <form onSubmit={handleSendRegisterOtp} className="space-y-4">
+                      {/* Notice about university firewalls */}
+                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-200/90 flex gap-2.5 items-start text-left">
+                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-semibold text-amber-200">Campus Email Firewall Notice</p>
+                          <p className="text-zinc-400 mt-0.5">
+                            Amrita email gateways often filter or delay automated codes into <span className="text-white font-medium">Spam/Junk</span>. Direct password registration above creates your account instantly with zero delays.
+                          </p>
+                        </div>
+                      </div>
 
-                  <div className="space-y-1">
-                    <p className="text-xs text-zinc-400">
-                      Enter the 6-digit code sent to your email:
-                      <br />
-                      <span className="font-mono text-zinc-200 font-semibold">{email}</span>
-                    </p>
-                  </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1.5 font-mono">
+                          Student Name
+                        </label>
+                        <div className="relative flex items-center">
+                          <User className="w-4 h-4 text-zinc-500 absolute left-3.5" />
+                          <input 
+                            type="text" 
+                            placeholder="e.g. Rahul Sharma" 
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            required
+                            className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
+                          />
+                        </div>
+                      </div>
 
-                  {/* 6 Digit Input Boxes */}
-                  <div className="flex justify-center gap-2 sm:gap-2.5" onPaste={handleDigitPaste}>
-                    {otpDigits.map((digit, idx) => (
-                      <input
-                        key={idx}
-                        ref={(el) => { inputRefs.current[idx] = el; }}
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        maxLength={1}
-                        value={digit}
-                        onChange={(e) => handleDigitChange(idx, e.target.value)}
-                        onKeyDown={(e) => handleDigitKeyDown(idx, e)}
-                        className={`w-11 h-14 sm:w-12 sm:h-14 rounded-2xl bg-[#09090b] border text-center font-mono text-xl font-bold text-white transition-all focus:outline-none ${
-                          digit 
-                            ? 'border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)] ring-1 ring-white/30' 
-                            : 'border-white/[0.12] hover:border-white/[0.24] focus:border-white focus:ring-2 focus:ring-white/20'
-                        }`}
-                      />
-                    ))}
-                  </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1.5 font-mono">
+                          Institutional Email
+                        </label>
+                        <div className="relative flex items-center">
+                          <Mail className="w-4 h-4 text-zinc-500 absolute left-3.5" />
+                          <input 
+                            type="email" 
+                            placeholder={`student@${collegeDomain}`} 
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required
+                            className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none tracking-tight"
+                          />
+                        </div>
+                      </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handleVerifyOtp()}
-                    disabled={loading || otpDigits.includes('')}
-                    className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin text-black" />
-                        <span>Verifying Digits...</span>
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Verify & Create Single Account</span>
-                      </>
-                    )}
-                  </button>
+                      <button 
+                        type="submit" 
+                        className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50 mt-2" 
+                        disabled={loading || !isEmailValidDomain || !email || !name.trim()}
+                      >
+                        {loading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-black" />
+                            <span>Dispatching Code...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Hash className="w-3.5 h-3.5" />
+                            <span>Send 6-Digit Code to Mail</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </>
+                        )}
+                      </button>
 
-                  <div className="flex items-center justify-between pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setOtpSent(false)}
-                      className="text-xs text-zinc-500 hover:text-white transition-colors"
-                    >
-                      ← Change email
-                    </button>
+                      <div className="text-center pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setUseOtpFlow(false)}
+                          className="text-xs text-zinc-400 hover:text-white transition-colors"
+                        >
+                          ← Back to Direct Password Registration
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    /* 6-Digit Verification Screen */
+                    <div className="space-y-6 text-center">
+                      <div className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-white/[0.1] flex items-center justify-center mx-auto text-emerald-400">
+                        <Hash className="w-6 h-6" />
+                      </div>
 
-                    <button
-                      type="button"
-                      onClick={(e) => handleSendRegisterOtp(e)}
-                      disabled={cooldown > 0 || loading}
-                      className="text-xs text-zinc-400 hover:text-white transition-colors inline-flex items-center gap-1.5 disabled:opacity-40"
-                    >
-                      <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
-                      <span>{cooldown > 0 ? `Resend digits (${cooldown}s)` : 'Resend code'}</span>
-                    </button>
-                  </div>
+                      <div className="space-y-1">
+                        <p className="text-xs text-zinc-400">
+                          Enter the 6-digit code sent to your email:
+                          <br />
+                          <span className="font-mono text-zinc-200 font-semibold">{email}</span>
+                        </p>
+                        <p className="text-[11px] text-amber-400/80">
+                          Check your Spam / Junk folder if not in primary inbox.
+                        </p>
+                      </div>
+
+                      {/* 6 Digit Input Boxes */}
+                      <div className="flex justify-center gap-2 sm:gap-2.5" onPaste={handleDigitPaste}>
+                        {otpDigits.map((digit, idx) => (
+                          <input
+                            key={idx}
+                            ref={(el) => { inputRefs.current[idx] = el; }}
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={1}
+                            value={digit}
+                            onChange={(e) => handleDigitChange(idx, e.target.value)}
+                            onKeyDown={(e) => handleDigitKeyDown(idx, e)}
+                            className={`w-11 h-14 sm:w-12 sm:h-14 rounded-2xl bg-[#09090b] border text-center font-mono text-xl font-bold text-white transition-all focus:outline-none ${
+                              digit 
+                                ? 'border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)] ring-1 ring-white/30' 
+                                : 'border-white/[0.12] hover:border-white/[0.24] focus:border-white focus:ring-2 focus:ring-white/20'
+                            }`}
+                          />
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleVerifyOtp()}
+                        disabled={loading || otpDigits.includes('')}
+                        className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {loading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-black" />
+                            <span>Verifying Digits...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Verify & Complete Registration</span>
+                          </>
+                        )}
+                      </button>
+
+                      <div className="flex items-center justify-between pt-2">
+                        <button
+                          type="button"
+                          onClick={() => { setOtpSent(false); setUseOtpFlow(false); }}
+                          className="text-xs text-zinc-500 hover:text-white transition-colors"
+                        >
+                          ← Switch to Password
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSendRegisterOtp()}
+                          disabled={cooldown > 0 || loading}
+                          className="text-xs text-zinc-400 hover:text-white transition-colors inline-flex items-center gap-1.5 disabled:opacity-40"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+                          <span>{cooldown > 0 ? `Resend (${cooldown}s)` : 'Resend code'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -537,15 +760,23 @@ export default function Login() {
                       </button>
                     </div>
                     <div className="relative flex items-center">
-                      <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5" />
+                      <Lock className="w-4 h-4 text-zinc-500 absolute left-3.5" />
                       <input 
-                        type="password" 
+                        type={showPassword ? 'text' : 'password'} 
                         placeholder="••••••••" 
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         required
-                        className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
+                        className="w-full luxury-inset-sm rounded-xl pl-10 pr-10 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 text-zinc-500 hover:text-zinc-300 transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
                   </div>
                 )}

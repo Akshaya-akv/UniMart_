@@ -135,7 +135,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       email: cleanEmail,
     });
 
-    if (error) throw error;
+    if (error) {
+      if ((error as any).code === 'over_email_send_rate_limit' || error.message?.includes('rate limit')) {
+        throw new Error('Amrita mail gateway rate limit reached. Please register directly with your mandatory password!');
+      }
+      throw error;
+    }
   };
 
   // Verify 6-Digit Numeric OTP and establish authenticated session
@@ -265,15 +270,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error(`Only institutional accounts (@${collegeDomain}) can create an account.`);
     }
 
-    if (password.length < 6) {
-      throw new Error('Password must be at least 6 characters.');
+    if (!password || password.length < 6) {
+      throw new Error('Password is mandatory and must be at least 6 characters.');
     }
 
     const cred = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
+    const displayName = name.trim() || trimmedEmail.split('@')[0];
     
     if (name.trim()) {
-      await updateProfile(cred.user, { displayName: name.trim() });
+      try {
+        await updateProfile(cred.user, { displayName });
+      } catch (profErr) {
+        console.warn('updateProfile error:', profErr);
+      }
     }
+
+    // Synchronize profile with Supabase profiles table
+    try {
+      await supabase.from('profiles').upsert({
+        id: cred.user.uid,
+        name: displayName,
+        email: trimmedEmail,
+        college_verified: true,
+      }, { onConflict: 'id' });
+    } catch (profileErr) {
+      console.warn('Profile sync:', profileErr);
+    }
+
+    const appUser: AppUser = {
+      id: cred.user.uid,
+      uid: cred.user.uid,
+      email: trimmedEmail,
+      displayName: displayName,
+      emailVerified: cred.user.emailVerified,
+      college_verified: true,
+      user_metadata: {
+        name: displayName
+      }
+    };
+    setUser(appUser);
+    setSession({ user: appUser });
 
     try {
       await sendEmailVerification(cred.user);
