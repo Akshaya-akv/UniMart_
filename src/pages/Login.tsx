@@ -652,11 +652,9 @@ export default function Login() {
           </div>
         </div>
 
-        <div>
-          <Link to="/" className="text-xs text-zinc-500 hover:text-white transition-colors font-medium tracking-tight">
-            ← Continue as Campus Guest
-          </Link>
-        </div>
+        <p className="text-[11px] text-zinc-600 font-mono tracking-tight">
+          Protected Institutional Gateway · Verified University Network
+        </p>
 
       </div>
     </div>
