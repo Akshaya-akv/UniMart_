@@ -1,7 +1,19 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
-import { ShieldCheck, ArrowRight, Loader2, KeyRound, Mail, User, AlertCircle } from 'lucide-react';
+import { 
+  ShieldCheck, 
+  ArrowRight, 
+  Loader2, 
+  KeyRound, 
+  Mail, 
+  User, 
+  AlertCircle, 
+  Send, 
+  CheckCircle2, 
+  Sparkles,
+  RefreshCw
+} from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 export default function Login() {
@@ -9,21 +21,88 @@ export default function Login() {
   const { 
     signInWithEmail, 
     signUpWithEmail, 
+    sendOneTimePasswordLink,
+    completeOneTimePasswordSignIn,
     signInWithGoogle, 
     sendPasswordReset, 
     collegeDomain, 
-    isFirebaseReady 
+    isFirebaseReady,
+    isIncomingEmailLink,
+    user
   } = useAuth();
 
-  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
+  // If already authenticated, redirect to home
+  useEffect(() => {
+    if (user) {
+      navigate('/');
+    }
+  }, [user, navigate]);
+
+  const [authMethod, setAuthMethod] = useState<'otp' | 'password'>('otp');
+  const [passwordMode, setPasswordMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
+  
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  
   const [loading, setLoading] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+
+  // Incoming email verification link state
+  const [verifyingLink, setVerifyingLink] = useState(false);
+  const [needsEmailConfirm, setNeedsEmailConfirm] = useState(false);
+  const [confirmEmailInput, setConfirmEmailInput] = useState('');
 
   const isEmailValidDomain = !email || email.toLowerCase().trim().endsWith(`@${collegeDomain.toLowerCase()}`);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Handle incoming one-time link verification on load
+  useEffect(() => {
+    if (isIncomingEmailLink) {
+      handleAutoVerifyLink();
+    }
+  }, [isIncomingEmailLink]);
+
+  // Resend cooldown timer
+  useEffect(() => {
+    if (cooldown > 0) {
+      const timer = setTimeout(() => setCooldown(cooldown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [cooldown]);
+
+  const handleAutoVerifyLink = async () => {
+    setVerifyingLink(true);
+    try {
+      await completeOneTimePasswordSignIn();
+      toast.success('College email verified! Welcome to UniMart.');
+      navigate('/');
+    } catch (err: any) {
+      if (err.message === 'EMAIL_REQUIRED') {
+        setNeedsEmailConfirm(true);
+      } else {
+        toast.error(err.message || 'Verification link expired or invalid.');
+      }
+    } finally {
+      setVerifyingLink(false);
+    }
+  };
+
+  const handleConfirmEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setVerifyingLink(true);
+    try {
+      await completeOneTimePasswordSignIn(confirmEmailInput);
+      toast.success('College email verified! Welcome to UniMart.');
+      navigate('/');
+    } catch (err: any) {
+      toast.error(err.message || 'Verification failed. Please request a new link.');
+    } finally {
+      setVerifyingLink(false);
+    }
+  };
+
+  const handleOtpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
 
@@ -34,35 +113,58 @@ export default function Login() {
 
     setLoading(true);
     try {
-      if (mode === 'signup') {
+      await sendOneTimePasswordLink(cleanEmail, name);
+      setOtpSent(true);
+      setCooldown(30);
+      toast.success('One-time password link dispatched to your college inbox!');
+    } catch (error: any) {
+      console.error('OTP send error:', error);
+      toast.error(error.message || 'Failed to dispatch one-time link.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail.endsWith(`@${collegeDomain.toLowerCase()}`)) {
+      toast.error(`Institutional access only. Email must end with @${collegeDomain}`);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (passwordMode === 'signup') {
         if (!name.trim()) {
           toast.error('Please enter your full name.');
           setLoading(false);
           return;
         }
         await signUpWithEmail(cleanEmail, password, name);
-        toast.success('Account created! Verification email dispatched to your college inbox.');
+        toast.success('Single student account registered! Welcome to UniMart.');
         navigate('/');
-      } else if (mode === 'signin') {
+      } else if (passwordMode === 'signin') {
         await signInWithEmail(cleanEmail, password);
         toast.success('Welcome back to UniMart!');
         navigate('/');
-      } else if (mode === 'forgot') {
+      } else if (passwordMode === 'forgot') {
         await sendPasswordReset(cleanEmail);
-        toast.success('Password reset link sent to your college email!');
-        setMode('signin');
+        toast.success('Password reset link sent to your college inbox!');
+        setPasswordMode('signin');
       }
     } catch (error: any) {
       console.error('Auth error:', error);
       const code = error.code;
       if (code === 'auth/email-already-in-use') {
         toast.error('An account already exists for this email. Please sign in.');
-        setMode('signin');
+        setPasswordMode('signin');
       } else if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
         toast.error('Invalid credentials. Check your password or reset it.');
       } else if (code === 'auth/user-not-found') {
-        toast.error('No account found for this institutional email. Create one below.');
-        setMode('signup');
+        toast.error('No account found for this institutional email. Register below.');
+        setPasswordMode('signup');
       } else if (code === 'auth/weak-password') {
         toast.error('Password must be at least 6 characters.');
       } else {
@@ -88,6 +190,59 @@ export default function Login() {
       setLoading(false);
     }
   };
+
+  // If returning via email link and processing
+  if (verifyingLink || needsEmailConfirm) {
+    return (
+      <div className="min-h-screen bg-[#000000] flex items-center justify-center p-4 selection:bg-white selection:text-black">
+        <div className="w-full max-w-md luxury-surface rounded-3xl p-8 text-center space-y-6">
+          <div className="w-12 h-12 rounded-2xl bg-white/[0.05] border border-white/[0.1] flex items-center justify-center mx-auto text-emerald-400">
+            {verifyingLink ? (
+              <Loader2 className="w-6 h-6 animate-spin text-white" />
+            ) : (
+              <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+            )}
+          </div>
+          
+          <div className="space-y-1.5">
+            <h2 className="text-xl font-bold text-white tracking-tight">
+              {verifyingLink ? 'Verifying College Email' : 'Confirm Your Email'}
+            </h2>
+            <p className="text-xs text-zinc-400 tracking-tight">
+              {verifyingLink 
+                ? 'Authorizing your institutional session token...' 
+                : 'Please re-enter your college email to finalize account activation.'}
+            </p>
+          </div>
+
+          {needsEmailConfirm && (
+            <form onSubmit={handleConfirmEmailSubmit} className="space-y-4 text-left">
+              <div>
+                <label className="text-xs font-semibold text-zinc-300 font-mono block mb-1.5 uppercase">
+                  Institutional Email
+                </label>
+                <input 
+                  type="email"
+                  required
+                  placeholder={`student@${collegeDomain}`}
+                  value={confirmEmailInput}
+                  onChange={(e) => setConfirmEmailInput(e.target.value)}
+                  className="w-full luxury-inset-sm rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
+                />
+              </div>
+              <button 
+                type="submit" 
+                disabled={verifyingLink}
+                className="w-full luxury-btn-white py-3 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2"
+              >
+                {verifyingLink ? <Loader2 className="w-4 h-4 animate-spin text-black" /> : <span>Complete Verification</span>}
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#000000] flex items-center justify-center p-4 selection:bg-white selection:text-black">
@@ -125,60 +280,58 @@ export default function Login() {
         {/* Luxury Authentication Chassis */}
         <div className="luxury-surface rounded-3xl p-7 sm:p-8 text-left space-y-6">
           
-          {/* Header & Mode Switcher */}
+          {/* Header & Primary Authentication Method Switcher */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold text-white tracking-tight">
-                  {mode === 'signin' && 'Student Authentication'}
-                  {mode === 'signup' && 'Create Campus Account'}
-                  {mode === 'forgot' && 'Reset Access Password'}
+                  {authMethod === 'otp' && (otpSent ? 'One-Time Link Dispatched' : 'One-Time Password (OTP)')}
+                  {authMethod === 'password' && (passwordMode === 'signin' ? 'Password Sign In' : passwordMode === 'signup' ? 'Register Account' : 'Reset Password')}
                 </h2>
                 <p className="text-xs text-zinc-400 tracking-tight">
-                  {mode === 'signin' && 'Access the verified student network.'}
-                  {mode === 'signup' && 'One verified account per student.'}
-                  {mode === 'forgot' && 'Enter your institutional email.'}
+                  {authMethod === 'otp' 
+                    ? 'Passwordless 1-click verification sent to your college inbox.'
+                    : 'Institutional credentials with single student account policy.'}
                 </p>
               </div>
 
-              {mode !== 'forgot' && (
-                <div className="flex rounded-xl p-1 bg-black/40 border border-white/[0.08]">
-                  <button
-                    type="button"
-                    onClick={() => setMode('signin')}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                      mode === 'signin' 
-                        ? 'bg-white text-black shadow-sm' 
-                        : 'text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    Sign In
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMode('signup')}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
-                      mode === 'signup' 
-                        ? 'bg-white text-black shadow-sm' 
-                        : 'text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    Register
-                  </button>
-                </div>
-              )}
+              {/* Method Switcher Pills */}
+              <div className="flex rounded-xl p-1 bg-black/40 border border-white/[0.08]">
+                <button
+                  type="button"
+                  onClick={() => { setAuthMethod('otp'); setOtpSent(false); }}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    authMethod === 'otp' 
+                      ? 'bg-white text-black shadow-sm' 
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Email OTP
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuthMethod('password')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                    authMethod === 'password' 
+                      ? 'bg-white text-black shadow-sm' 
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Password
+                </button>
+              </div>
             </div>
 
             {/* Strict Domain Indicator */}
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[11px] font-mono text-zinc-400">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span>Restricted Domain:</span>
+              <span>Institutional Domain:</span>
               <span className="text-zinc-200 font-semibold">@{collegeDomain}</span>
             </div>
           </div>
 
           {/* 1-Click Institutional Google Workspace Auth */}
-          {mode !== 'forgot' && (
+          {!otpSent && (
             <div>
               <button
                 type="button"
@@ -200,123 +353,270 @@ export default function Login() {
                   <div className="w-full border-t border-white/[0.08]" />
                 </div>
                 <div className="relative flex justify-center text-[10px] uppercase font-mono tracking-widest text-zinc-500">
-                  <span className="bg-[#09090b] px-3">or institutional credentials</span>
+                  <span className="bg-[#09090b] px-3">or institutional email verification</span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            
-            {mode === 'signup' && (
-              <div>
-                <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1.5 font-mono">
-                  Full Name
-                </label>
-                <div className="relative flex items-center">
-                  <User className="w-4 h-4 text-zinc-500 absolute left-3.5" />
-                  <input 
-                    type="text" 
-                    placeholder="e.g. Rahul Sharma" 
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
-                  />
-                </div>
-              </div>
-            )}
-
+          {/* MODE A: ONE-TIME PASSWORD / EMAIL LINK FLOW */}
+          {authMethod === 'otp' && (
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider font-mono">
-                  Institutional Email
-                </label>
-                {!isEmailValidDomain && (
-                  <span className="text-[10px] font-mono text-amber-400">
-                    Must end with @{collegeDomain}
-                  </span>
-                )}
-              </div>
-              <div className="relative flex items-center">
-                <Mail className="w-4 h-4 text-zinc-500 absolute left-3.5" />
-                <input 
-                  type="email" 
-                  placeholder={`student@${collegeDomain}`} 
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className={`w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none tracking-tight transition-colors ${
-                    !isEmailValidDomain ? 'border-amber-500/50' : 'focus:border-white/[0.3]'
-                  }`}
-                />
-              </div>
-            </div>
+              {!otpSent ? (
+                <form onSubmit={handleOtpSubmit} className="space-y-4">
+                  <div>
+                    <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1.5 font-mono">
+                      Student Name (Optional)
+                    </label>
+                    <div className="relative flex items-center">
+                      <User className="w-4 h-4 text-zinc-500 absolute left-3.5" />
+                      <input 
+                        type="text" 
+                        placeholder="e.g. Rahul Sharma" 
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
+                      />
+                    </div>
+                  </div>
 
-            {mode !== 'forgot' && (
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider font-mono">
-                    Password
-                  </label>
-                  {mode === 'signin' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider font-mono">
+                        Institutional Email
+                      </label>
+                      {!isEmailValidDomain && (
+                        <span className="text-[10px] font-mono text-amber-400">
+                          Must end with @{collegeDomain}
+                        </span>
+                      )}
+                    </div>
+                    <div className="relative flex items-center">
+                      <Mail className="w-4 h-4 text-zinc-500 absolute left-3.5" />
+                      <input 
+                        type="email" 
+                        placeholder={`student@${collegeDomain}`} 
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                        className={`w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none tracking-tight transition-colors ${
+                          !isEmailValidDomain ? 'border-amber-500/50' : 'focus:border-white/[0.3]'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <button 
+                    type="submit" 
+                    className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50 mt-2" 
+                    disabled={loading || !isFirebaseReady || !isEmailValidDomain || !email}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-black" />
+                        <span>Sending One-Time Password Link...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Send One-Time Password Link</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                /* Success Confirmation State */
+                <div className="space-y-5 text-center py-2">
+                  <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto text-emerald-400 shadow-[0_0_24px_rgba(16,185,129,0.15)]">
+                    <Send className="w-6 h-6 animate-pulse" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <h3 className="text-base font-bold text-white tracking-tight">Check your college inbox</h3>
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      We sent a one-time sign-in link to:
+                      <br />
+                      <span className="font-mono text-zinc-200 font-semibold">{email}</span>
+                    </p>
+                  </div>
+
+                  <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.08] text-[11px] text-zinc-400 text-left space-y-1.5 leading-relaxed">
+                    <p className="font-semibold text-white">How to verify:</p>
+                    <ol className="list-decimal list-inside space-y-1">
+                      <li>Open your university webmail or email app.</li>
+                      <li>Click the secure <strong>"Sign in to UniMart"</strong> button.</li>
+                      <li>You will be instantly authenticated with your single campus account.</li>
+                    </ol>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
                     <button
                       type="button"
-                      onClick={() => setMode('forgot')}
-                      className="text-[10px] text-zinc-400 hover:text-white transition-colors"
+                      onClick={() => setOtpSent(false)}
+                      className="text-xs text-zinc-500 hover:text-white transition-colors"
                     >
-                      Forgot password?
+                      ← Change email
                     </button>
-                  )}
-                </div>
-                <div className="relative flex items-center">
-                  <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5" />
-                  <input 
-                    type="password" 
-                    placeholder="••••••••" 
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    minLength={6}
-                    className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
-                  />
-                </div>
-              </div>
-            )}
 
-            <button 
-              type="submit" 
-              className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50 mt-2" 
-              disabled={loading || !isFirebaseReady || !isEmailValidDomain}
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-black" />
-                  <span>Authorizing...</span>
-                </>
-              ) : (
-                <>
-                  <span>
-                    {mode === 'signin' && 'Sign In to Campus Exchange'}
-                    {mode === 'signup' && 'Register Single Student Account'}
-                    {mode === 'forgot' && 'Send Password Reset Link'}
-                  </span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </>
+                    <button
+                      type="button"
+                      onClick={handleOtpSubmit}
+                      disabled={cooldown > 0 || loading}
+                      className="text-xs text-zinc-400 hover:text-white transition-colors inline-flex items-center gap-1.5 disabled:opacity-40"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+                      <span>{cooldown > 0 ? `Resend link (${cooldown}s)` : 'Resend link'}</span>
+                    </button>
+                  </div>
+                </div>
               )}
-            </button>
-          </form>
+            </div>
+          )}
 
-          {mode === 'forgot' && (
-            <div className="text-center pt-2">
-              <button
-                type="button"
-                onClick={() => setMode('signin')}
-                className="text-xs text-zinc-400 hover:text-white transition-colors"
-              >
-                ← Back to Sign In
-              </button>
+          {/* MODE B: PASSWORD AUTHENTICATION FLOW */}
+          {authMethod === 'password' && (
+            <div>
+              {/* Sign In vs Register toggle */}
+              {passwordMode !== 'forgot' && (
+                <div className="flex items-center justify-center gap-3 mb-4 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setPasswordMode('signin')}
+                    className={`font-semibold pb-1 border-b-2 transition-all ${
+                      passwordMode === 'signin' 
+                        ? 'border-white text-white' 
+                        : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    Sign In
+                  </button>
+                  <span className="text-zinc-700">·</span>
+                  <button
+                    type="button"
+                    onClick={() => setPasswordMode('signup')}
+                    className={`font-semibold pb-1 border-b-2 transition-all ${
+                      passwordMode === 'signup' 
+                        ? 'border-white text-white' 
+                        : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    Register Single Account
+                  </button>
+                </div>
+              )}
+
+              <form onSubmit={handlePasswordSubmit} className="space-y-4">
+                {passwordMode === 'signup' && (
+                  <div>
+                    <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1.5 font-mono">
+                      Full Name
+                    </label>
+                    <div className="relative flex items-center">
+                      <User className="w-4 h-4 text-zinc-500 absolute left-3.5" />
+                      <input 
+                        type="text" 
+                        placeholder="e.g. Rahul Sharma" 
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        required
+                        className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider font-mono">
+                      Institutional Email
+                    </label>
+                    {!isEmailValidDomain && (
+                      <span className="text-[10px] font-mono text-amber-400">
+                        Must end with @{collegeDomain}
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative flex items-center">
+                    <Mail className="w-4 h-4 text-zinc-500 absolute left-3.5" />
+                    <input 
+                      type="email" 
+                      placeholder={`student@${collegeDomain}`} 
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      className={`w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none tracking-tight transition-colors ${
+                        !isEmailValidDomain ? 'border-amber-500/50' : 'focus:border-white/[0.3]'
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                {passwordMode !== 'forgot' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider font-mono">
+                        Password
+                      </label>
+                      {passwordMode === 'signin' && (
+                        <button
+                          type="button"
+                          onClick={() => setPasswordMode('forgot')}
+                          className="text-[10px] text-zinc-400 hover:text-white transition-colors"
+                        >
+                          Forgot password?
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative flex items-center">
+                      <KeyRound className="w-4 h-4 text-zinc-500 absolute left-3.5" />
+                      <input 
+                        type="password" 
+                        placeholder="••••••••" 
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        minLength={6}
+                        className="w-full luxury-inset-sm rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <button 
+                  type="submit" 
+                  className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50 mt-2" 
+                  disabled={loading || !isFirebaseReady || !isEmailValidDomain}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-black" />
+                      <span>Authorizing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>
+                        {passwordMode === 'signin' && 'Sign In to Campus Exchange'}
+                        {passwordMode === 'signup' && 'Register Single Student Account'}
+                        {passwordMode === 'forgot' && 'Send Password Reset Link'}
+                      </span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {passwordMode === 'forgot' && (
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setPasswordMode('signin')}
+                    className="text-xs text-zinc-400 hover:text-white transition-colors"
+                  >
+                    ← Back to Sign In
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

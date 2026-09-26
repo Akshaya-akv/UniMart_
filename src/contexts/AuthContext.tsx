@@ -10,6 +10,9 @@ import {
   updateProfile,
   sendEmailVerification,
   sendPasswordResetEmail,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
   isFirebaseConfigured
 } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
@@ -37,10 +40,13 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, name: string) => Promise<void>;
+  sendOneTimePasswordLink: (email: string, name?: string) => Promise<void>;
+  completeOneTimePasswordSignIn: (email?: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   collegeDomain: string;
   isFirebaseReady: boolean;
+  isIncomingEmailLink: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -49,6 +55,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<AppSession | null>(null);
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isIncomingEmailLink, setIsIncomingEmailLink] = useState(false);
 
   const collegeDomain = import.meta.env.VITE_COLLEGE_EMAIL_DOMAIN || 'ch.students.amrita.edu';
 
@@ -57,6 +64,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('Firebase configuration missing. Please supply VITE_FIREBASE_* variables in .env');
       setLoading(false);
       return;
+    }
+
+    if (isSignInWithEmailLink(auth, window.location.href)) {
+      setIsIncomingEmailLink(true);
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
@@ -108,6 +119,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => unsubscribe();
   }, [collegeDomain]);
+
+  const sendOneTimePasswordLink = async (email: string, name?: string) => {
+    const trimmedEmail = email.trim().toLowerCase();
+    const expectedDomain = collegeDomain.toLowerCase();
+
+    if (expectedDomain && !trimmedEmail.endsWith(`@${expectedDomain}`)) {
+      throw new Error(`Only institutional accounts (@${collegeDomain}) can request one-time access.`);
+    }
+
+    const actionCodeSettings = {
+      url: `${window.location.origin}/login?emailLink=true`,
+      handleCodeInApp: true,
+    };
+
+    await sendSignInLinkToEmail(auth, trimmedEmail, actionCodeSettings);
+    window.localStorage.setItem('emailForSignIn', trimmedEmail);
+    if (name?.trim()) {
+      window.localStorage.setItem('nameForSignIn', name.trim());
+    }
+  };
+
+  const completeOneTimePasswordSignIn = async (emailFromInput?: string) => {
+    if (!isSignInWithEmailLink(auth, window.location.href)) {
+      throw new Error('Invalid or expired authentication link.');
+    }
+
+    const email = emailFromInput?.trim().toLowerCase() || window.localStorage.getItem('emailForSignIn')?.toLowerCase();
+
+    if (!email) {
+      throw new Error('EMAIL_REQUIRED');
+    }
+
+    const expectedDomain = collegeDomain.toLowerCase();
+    if (expectedDomain && !email.endsWith(`@${expectedDomain}`)) {
+      throw new Error(`Only institutional accounts (@${collegeDomain}) are authorized.`);
+    }
+
+    const cred = await signInWithEmailLink(auth, email, window.location.href);
+    window.localStorage.removeItem('emailForSignIn');
+
+    const storedName = window.localStorage.getItem('nameForSignIn');
+    if (storedName && cred.user) {
+      await updateProfile(cred.user, { displayName: storedName });
+      window.localStorage.removeItem('nameForSignIn');
+    }
+
+    window.history.replaceState({}, document.title, window.location.pathname);
+    setIsIncomingEmailLink(false);
+  };
 
   const signUpWithEmail = async (email: string, password: string, name: string) => {
     const trimmedEmail = email.trim().toLowerCase();
@@ -181,11 +241,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signOut, 
         signInWithEmail, 
         signUpWithEmail, 
+        sendOneTimePasswordLink,
+        completeOneTimePasswordSignIn,
         signInWithGoogle, 
         sendPasswordReset, 
         collegeDomain, 
         loading,
-        isFirebaseReady: isFirebaseConfigured
+        isFirebaseReady: isFirebaseConfigured,
+        isIncomingEmailLink
       }}
     >
       {!loading && children}

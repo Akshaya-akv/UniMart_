@@ -8,6 +8,9 @@ import {
   signOut as firebaseSignOut,
   sendEmailVerification,
   sendPasswordResetEmail,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
   updateProfile,
   onAuthStateChanged,
   type User as FirebaseUser
@@ -52,6 +55,9 @@ export {
   firebaseSignOut,
   sendEmailVerification,
   sendPasswordResetEmail,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
   updateProfile,
   onAuthStateChanged,
   type FirebaseUser
