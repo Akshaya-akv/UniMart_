@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { 
@@ -12,7 +12,8 @@ import {
   Send, 
   CheckCircle2, 
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  Hash
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -21,13 +22,12 @@ export default function Login() {
   const { 
     signInWithEmail, 
     signUpWithEmail, 
-    sendOneTimePasswordLink,
-    completeOneTimePasswordSignIn,
+    sendDigitOtp,
+    verifyDigitOtp,
     signInWithGoogle, 
     sendPasswordReset, 
     collegeDomain, 
     isFirebaseReady,
-    isIncomingEmailLink,
     user
   } = useAuth();
 
@@ -45,23 +45,15 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   
-  const [loading, setLoading] = useState(false);
+  // 6-Digit OTP State
+  const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
   const [otpSent, setOtpSent] = useState(false);
   const [cooldown, setCooldown] = useState(0);
+  const [loading, setLoading] = useState(false);
 
-  // Incoming email verification link state
-  const [verifyingLink, setVerifyingLink] = useState(false);
-  const [needsEmailConfirm, setNeedsEmailConfirm] = useState(false);
-  const [confirmEmailInput, setConfirmEmailInput] = useState('');
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const isEmailValidDomain = !email || email.toLowerCase().trim().endsWith(`@${collegeDomain.toLowerCase()}`);
-
-  // Handle incoming one-time link verification on load
-  useEffect(() => {
-    if (isIncomingEmailLink) {
-      handleAutoVerifyLink();
-    }
-  }, [isIncomingEmailLink]);
 
   // Resend cooldown timer
   useEffect(() => {
@@ -71,39 +63,71 @@ export default function Login() {
     }
   }, [cooldown]);
 
-  const handleAutoVerifyLink = async () => {
-    setVerifyingLink(true);
-    try {
-      await completeOneTimePasswordSignIn();
-      toast.success('College email verified! Welcome to UniMart.');
-      navigate('/');
-    } catch (err: any) {
-      if (err.message === 'EMAIL_REQUIRED') {
-        setNeedsEmailConfirm(true);
+  // Focus first OTP input when screen changes to OTP verification
+  useEffect(() => {
+    if (otpSent && inputRefs.current[0]) {
+      inputRefs.current[0].focus();
+    }
+  }, [otpSent]);
+
+  // Handle digit input change
+  const handleDigitChange = (index: number, value: string) => {
+    // Only accept numeric digits
+    const cleaned = value.replace(/[^0-9]/g, '');
+    if (!cleaned && value !== '') return;
+
+    const newDigits = [...otpDigits];
+    newDigits[index] = cleaned.slice(-1); // Take last character entered
+    setOtpDigits(newDigits);
+
+    // Auto-advance focus to next input
+    if (cleaned && index < 5 && inputRefs.current[index + 1]) {
+      inputRefs.current[index + 1]?.focus();
+    }
+
+    // Auto-submit if all 6 digits entered
+    const combined = newDigits.join('');
+    if (combined.length === 6 && !newDigits.includes('')) {
+      handleVerifyOtp(combined);
+    }
+  };
+
+  // Handle Backspace and Arrow keys
+  const handleDigitKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace') {
+      if (!otpDigits[index] && index > 0 && inputRefs.current[index - 1]) {
+        // Move to previous and clear it
+        const newDigits = [...otpDigits];
+        newDigits[index - 1] = '';
+        setOtpDigits(newDigits);
+        inputRefs.current[index - 1]?.focus();
       } else {
-        toast.error(err.message || 'Verification link expired or invalid.');
+        const newDigits = [...otpDigits];
+        newDigits[index] = '';
+        setOtpDigits(newDigits);
       }
-    } finally {
-      setVerifyingLink(false);
+    } else if (e.key === 'ArrowLeft' && index > 0) {
+      inputRefs.current[index - 1]?.focus();
+    } else if (e.key === 'ArrowRight' && index < 5) {
+      inputRefs.current[index + 1]?.focus();
     }
   };
 
-  const handleConfirmEmailSubmit = async (e: React.FormEvent) => {
+  // Handle paste of 6-digit code
+  const handleDigitPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();
-    setVerifyingLink(true);
-    try {
-      await completeOneTimePasswordSignIn(confirmEmailInput);
-      toast.success('College email verified! Welcome to UniMart.');
-      navigate('/');
-    } catch (err: any) {
-      toast.error(err.message || 'Verification failed. Please request a new link.');
-    } finally {
-      setVerifyingLink(false);
+    const pasted = e.clipboardData.getData('text').trim().replace(/[^0-9]/g, '');
+    if (pasted.length === 6) {
+      const chars = pasted.split('');
+      setOtpDigits(chars);
+      inputRefs.current[5]?.focus();
+      handleVerifyOtp(pasted);
     }
   };
 
-  const handleOtpSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Dispatch 6-Digit OTP to college email
+  const handleSendOtp = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
 
     if (!cleanEmail.endsWith(`@${collegeDomain.toLowerCase()}`)) {
@@ -113,13 +137,35 @@ export default function Login() {
 
     setLoading(true);
     try {
-      await sendOneTimePasswordLink(cleanEmail, name);
+      await sendDigitOtp(cleanEmail);
       setOtpSent(true);
       setCooldown(30);
-      toast.success('One-time password link dispatched to your college inbox!');
+      setOtpDigits(['', '', '', '', '', '']);
+      toast.success('6-digit code dispatched to your college inbox!');
     } catch (error: any) {
       console.error('OTP send error:', error);
-      toast.error(error.message || 'Failed to dispatch one-time link.');
+      toast.error(error.message || 'Failed to dispatch verification code.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Verify 6-digit code
+  const handleVerifyOtp = async (codeToVerify?: string) => {
+    const code = codeToVerify || otpDigits.join('');
+    if (code.length !== 6) {
+      toast.error('Please enter all 6 digits of the confirmation code.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await verifyDigitOtp(email.trim().toLowerCase(), code, name);
+      toast.success('Verification successful! Welcome to UniMart.');
+      navigate('/');
+    } catch (error: any) {
+      console.error('OTP verification error:', error);
+      toast.error(error.message || 'Invalid or expired confirmation code.');
     } finally {
       setLoading(false);
     }
@@ -191,59 +237,6 @@ export default function Login() {
     }
   };
 
-  // If returning via email link and processing
-  if (verifyingLink || needsEmailConfirm) {
-    return (
-      <div className="min-h-screen bg-[#000000] flex items-center justify-center p-4 selection:bg-white selection:text-black">
-        <div className="w-full max-w-md luxury-surface rounded-3xl p-8 text-center space-y-6">
-          <div className="w-12 h-12 rounded-2xl bg-white/[0.05] border border-white/[0.1] flex items-center justify-center mx-auto text-emerald-400">
-            {verifyingLink ? (
-              <Loader2 className="w-6 h-6 animate-spin text-white" />
-            ) : (
-              <CheckCircle2 className="w-6 h-6 text-emerald-400" />
-            )}
-          </div>
-          
-          <div className="space-y-1.5">
-            <h2 className="text-xl font-bold text-white tracking-tight">
-              {verifyingLink ? 'Verifying College Email' : 'Confirm Your Email'}
-            </h2>
-            <p className="text-xs text-zinc-400 tracking-tight">
-              {verifyingLink 
-                ? 'Authorizing your institutional session token...' 
-                : 'Please re-enter your college email to finalize account activation.'}
-            </p>
-          </div>
-
-          {needsEmailConfirm && (
-            <form onSubmit={handleConfirmEmailSubmit} className="space-y-4 text-left">
-              <div>
-                <label className="text-xs font-semibold text-zinc-300 font-mono block mb-1.5 uppercase">
-                  Institutional Email
-                </label>
-                <input 
-                  type="email"
-                  required
-                  placeholder={`student@${collegeDomain}`}
-                  value={confirmEmailInput}
-                  onChange={(e) => setConfirmEmailInput(e.target.value)}
-                  className="w-full luxury-inset-sm rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/[0.3] tracking-tight"
-                />
-              </div>
-              <button 
-                type="submit" 
-                disabled={verifyingLink}
-                className="w-full luxury-btn-white py-3 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2"
-              >
-                {verifyingLink ? <Loader2 className="w-4 h-4 animate-spin text-black" /> : <span>Complete Verification</span>}
-              </button>
-            </form>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-[#000000] flex items-center justify-center p-4 selection:bg-white selection:text-black">
       <div className="w-full max-w-md space-y-6 text-center">
@@ -269,9 +262,9 @@ export default function Login() {
           <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4 text-left flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div className="text-xs text-amber-200 space-y-1">
-              <p className="font-semibold text-white">Firebase Setup Required</p>
+              <p className="font-semibold text-white">Firebase Setup Notice</p>
               <p className="text-amber-300/80 leading-relaxed">
-                Add your Firebase project configuration credentials to <code className="bg-black/50 px-1 py-0.5 rounded text-white">.env</code> to activate live authentication.
+                Connect your Firebase project credentials in <code className="bg-black/50 px-1 py-0.5 rounded text-white">.env</code> to activate cloud user sessions.
               </p>
             </div>
           </div>
@@ -285,12 +278,12 @@ export default function Login() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold text-white tracking-tight">
-                  {authMethod === 'otp' && (otpSent ? 'One-Time Link Dispatched' : 'One-Time Password (OTP)')}
+                  {authMethod === 'otp' && (otpSent ? 'Confirm 6-Digit Code' : '6-Digit One-Time Password')}
                   {authMethod === 'password' && (passwordMode === 'signin' ? 'Password Sign In' : passwordMode === 'signup' ? 'Register Account' : 'Reset Password')}
                 </h2>
                 <p className="text-xs text-zinc-400 tracking-tight">
                   {authMethod === 'otp' 
-                    ? 'Passwordless 1-click verification sent to your college inbox.'
+                    ? (otpSent ? 'Enter the digits sent to your college mail.' : '6-digit confirmation code sent to your institutional email.')
                     : 'Institutional credentials with single student account policy.'}
                 </p>
               </div>
@@ -306,7 +299,7 @@ export default function Login() {
                       : 'text-zinc-400 hover:text-white'
                   }`}
                 >
-                  Email OTP
+                  6-Digit OTP
                 </button>
                 <button
                   type="button"
@@ -336,7 +329,7 @@ export default function Login() {
               <button
                 type="button"
                 onClick={handleGoogleSignIn}
-                disabled={loading || !isFirebaseReady}
+                disabled={loading}
                 className="w-full py-2.5 px-4 rounded-xl border border-white/[0.12] bg-[#0c0c10] hover:bg-[#15151c] hover:border-white/[0.22] text-xs font-medium text-white flex items-center justify-center gap-2.5 transition-all active:scale-[0.99] disabled:opacity-50"
               >
                 <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
@@ -353,20 +346,21 @@ export default function Login() {
                   <div className="w-full border-t border-white/[0.08]" />
                 </div>
                 <div className="relative flex justify-center text-[10px] uppercase font-mono tracking-widest text-zinc-500">
-                  <span className="bg-[#09090b] px-3">or institutional email verification</span>
+                  <span className="bg-[#09090b] px-3">or institutional 6-digit verification</span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* MODE A: ONE-TIME PASSWORD / EMAIL LINK FLOW */}
+          {/* METHOD 1: 6-DIGIT NUMERIC OTP FLOW */}
           {authMethod === 'otp' && (
             <div>
               {!otpSent ? (
-                <form onSubmit={handleOtpSubmit} className="space-y-4">
+                /* Step 1: Enter Email & Request 6 Digits */
+                <form onSubmit={handleSendOtp} className="space-y-4">
                   <div>
                     <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider block mb-1.5 font-mono">
-                      Student Name (Optional)
+                      Student Name
                     </label>
                     <div className="relative flex items-center">
                       <User className="w-4 h-4 text-zinc-500 absolute left-3.5" />
@@ -409,46 +403,77 @@ export default function Login() {
                   <button 
                     type="submit" 
                     className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50 mt-2" 
-                    disabled={loading || !isFirebaseReady || !isEmailValidDomain || !email}
+                    disabled={loading || !isEmailValidDomain || !email}
                   >
                     {loading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin text-black" />
-                        <span>Sending One-Time Password Link...</span>
+                        <span>Dispatching 6-Digit Code...</span>
                       </>
                     ) : (
                       <>
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Send One-Time Password Link</span>
+                        <Hash className="w-3.5 h-3.5" />
+                        <span>Send 6-Digit Code</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </>
                     )}
                   </button>
                 </form>
               ) : (
-                /* Success Confirmation State */
-                <div className="space-y-5 text-center py-2">
-                  <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto text-emerald-400 shadow-[0_0_24px_rgba(16,185,129,0.15)]">
-                    <Send className="w-6 h-6 animate-pulse" />
+                /* Step 2: 6-Box Digit Input Screen */
+                <div className="space-y-6 text-center">
+                  <div className="w-12 h-12 rounded-2xl bg-white/[0.04] border border-white/[0.1] flex items-center justify-center mx-auto text-emerald-400">
+                    <Hash className="w-6 h-6" />
                   </div>
 
                   <div className="space-y-1">
-                    <h3 className="text-base font-bold text-white tracking-tight">Check your college inbox</h3>
-                    <p className="text-xs text-zinc-400 leading-relaxed">
-                      We sent a one-time sign-in link to:
+                    <p className="text-xs text-zinc-400">
+                      Enter the 6-digit confirmation code sent to:
                       <br />
                       <span className="font-mono text-zinc-200 font-semibold">{email}</span>
                     </p>
                   </div>
 
-                  <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.08] text-[11px] text-zinc-400 text-left space-y-1.5 leading-relaxed">
-                    <p className="font-semibold text-white">How to verify:</p>
-                    <ol className="list-decimal list-inside space-y-1">
-                      <li>Open your university webmail or email app.</li>
-                      <li>Click the secure <strong>"Sign in to UniMart"</strong> button.</li>
-                      <li>You will be instantly authenticated with your single campus account.</li>
-                    </ol>
+                  {/* 6 Digit Input Boxes */}
+                  <div className="flex justify-center gap-2 sm:gap-2.5" onPaste={handleDigitPaste}>
+                    {otpDigits.map((digit, idx) => (
+                      <input
+                        key={idx}
+                        ref={(el) => (inputRefs.current[idx] = el)}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={1}
+                        value={digit}
+                        onChange={(e) => handleDigitChange(idx, e.target.value)}
+                        onKeyDown={(e) => handleDigitKeyDown(idx, e)}
+                        className={`w-11 h-14 sm:w-12 sm:h-14 rounded-2xl bg-[#09090b] border text-center font-mono text-xl font-bold text-white transition-all focus:outline-none ${
+                          digit 
+                            ? 'border-white text-white shadow-[0_0_12px_rgba(255,255,255,0.15)] ring-1 ring-white/30' 
+                            : 'border-white/[0.12] hover:border-white/[0.24] focus:border-white focus:ring-2 focus:ring-white/20'
+                        }`}
+                      />
+                    ))}
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleVerifyOtp()}
+                    disabled={loading || otpDigits.includes('')}
+                    className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-black" />
+                        <span>Verifying Digits...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Verify & Sign In</span>
+                      </>
+                    )}
+                  </button>
 
                   <div className="flex items-center justify-between pt-2">
                     <button
@@ -461,12 +486,12 @@ export default function Login() {
 
                     <button
                       type="button"
-                      onClick={handleOtpSubmit}
+                      onClick={() => handleSendOtp()}
                       disabled={cooldown > 0 || loading}
                       className="text-xs text-zinc-400 hover:text-white transition-colors inline-flex items-center gap-1.5 disabled:opacity-40"
                     >
                       <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
-                      <span>{cooldown > 0 ? `Resend link (${cooldown}s)` : 'Resend link'}</span>
+                      <span>{cooldown > 0 ? `Resend digits (${cooldown}s)` : 'Resend code'}</span>
                     </button>
                   </div>
                 </div>
@@ -474,10 +499,9 @@ export default function Login() {
             </div>
           )}
 
-          {/* MODE B: PASSWORD AUTHENTICATION FLOW */}
+          {/* METHOD 2: PASSWORD AUTHENTICATION FLOW */}
           {authMethod === 'password' && (
             <div>
-              {/* Sign In vs Register toggle */}
               {passwordMode !== 'forgot' && (
                 <div className="flex items-center justify-center gap-3 mb-4 text-xs">
                   <button
@@ -586,7 +610,7 @@ export default function Login() {
                 <button 
                   type="submit" 
                   className="w-full luxury-btn-white py-3.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50 mt-2" 
-                  disabled={loading || !isFirebaseReady || !isEmailValidDomain}
+                  disabled={loading || !isEmailValidDomain}
                 >
                   {loading ? (
                     <>

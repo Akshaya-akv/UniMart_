@@ -40,6 +40,8 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, name: string) => Promise<void>;
+  sendDigitOtp: (email: string) => Promise<void>;
+  verifyDigitOtp: (email: string, token: string, name?: string, password?: string) => Promise<void>;
   sendOneTimePasswordLink: (email: string, name?: string) => Promise<void>;
   completeOneTimePasswordSignIn: (email?: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
@@ -119,6 +121,92 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => unsubscribe();
   }, [collegeDomain]);
+
+  // Send 6-Digit Numeric OTP to college email
+  const sendDigitOtp = async (email: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const expectedDomain = collegeDomain.toLowerCase();
+
+    if (expectedDomain && !cleanEmail.endsWith(`@${expectedDomain}`)) {
+      throw new Error(`Only institutional accounts (@${collegeDomain}) can receive an OTP.`);
+    }
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: cleanEmail,
+    });
+
+    if (error) throw error;
+  };
+
+  // Verify 6-Digit Numeric OTP and establish authenticated session
+  const verifyDigitOtp = async (email: string, token: string, name?: string, password?: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const expectedDomain = collegeDomain.toLowerCase();
+
+    if (expectedDomain && !cleanEmail.endsWith(`@${expectedDomain}`)) {
+      throw new Error(`Only institutional accounts (@${collegeDomain}) are authorized.`);
+    }
+
+    const { data: supaData, error: supaError } = await supabase.auth.verifyOtp({
+      email: cleanEmail,
+      token: token.trim(),
+      type: 'email',
+    });
+
+    if (supaError) {
+      throw supaError;
+    }
+
+    const displayName = name?.trim() || cleanEmail.split('@')[0];
+    const uid = supaData.user?.id || auth.currentUser?.uid || 'user_' + Date.now();
+
+    // Register / Synchronize in Firebase Auth for single account tracking
+    if (isFirebaseConfigured) {
+      const authPassword = password && password.length >= 6 
+        ? password 
+        : `UniMart#${cleanEmail.replace(/[^a-zA-Z0-9]/g, '')}!2026`;
+
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, cleanEmail, authPassword);
+        if (displayName) {
+          await updateProfile(cred.user, { displayName });
+        }
+      } catch (fbErr: any) {
+        if (fbErr.code === 'auth/email-already-in-use') {
+          try {
+            await signInWithEmailAndPassword(auth, cleanEmail, authPassword);
+          } catch {
+            // User already has account and is verified via OTP
+          }
+        }
+      }
+    }
+
+    // Synchronize profile with Supabase database
+    try {
+      await supabase.from('profiles').upsert({
+        id: uid,
+        name: displayName,
+        email: cleanEmail,
+        college_verified: true,
+      }, { onConflict: 'id' });
+    } catch (err) {
+      console.warn('Profile sync:', err);
+    }
+
+    const appUser: AppUser = {
+      id: uid,
+      uid: uid,
+      email: cleanEmail,
+      displayName: displayName,
+      emailVerified: true,
+      college_verified: true,
+      user_metadata: { name: displayName },
+    };
+
+    setUser(appUser);
+    setSession({ user: appUser });
+  };
 
   const sendOneTimePasswordLink = async (email: string, name?: string) => {
     const trimmedEmail = email.trim().toLowerCase();
@@ -229,6 +317,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     await firebaseSignOut(auth);
+    await supabase.auth.signOut();
     setUser(null);
     setSession(null);
   };
@@ -241,6 +330,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signOut, 
         signInWithEmail, 
         signUpWithEmail, 
+        sendDigitOtp,
+        verifyDigitOtp,
         sendOneTimePasswordLink,
         completeOneTimePasswordSignIn,
         signInWithGoogle, 
