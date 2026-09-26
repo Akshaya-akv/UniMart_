@@ -10,9 +10,6 @@ import {
   updateProfile,
   sendEmailVerification,
   sendPasswordResetEmail,
-  sendSignInLinkToEmail,
-  isSignInWithEmailLink,
-  signInWithEmailLink,
   isFirebaseConfigured
 } from '../lib/firebase';
 import { supabase } from '../lib/supabase';
@@ -40,15 +37,10 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, name: string) => Promise<void>;
-  sendDigitOtp: (email: string) => Promise<void>;
-  verifyDigitOtp: (email: string, token: string, name?: string, password?: string) => Promise<void>;
-  sendOneTimePasswordLink: (email: string, name?: string) => Promise<void>;
-  completeOneTimePasswordSignIn: (email?: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   collegeDomain: string;
   isFirebaseReady: boolean;
-  isIncomingEmailLink: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -57,7 +49,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<AppSession | null>(null);
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isIncomingEmailLink, setIsIncomingEmailLink] = useState(false);
 
   const collegeDomain = import.meta.env.VITE_COLLEGE_EMAIL_DOMAIN || 'ch.students.amrita.edu';
 
@@ -68,10 +59,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    if (isSignInWithEmailLink(auth, window.location.href)) {
-      setIsIncomingEmailLink(true);
-    }
-
+    // Pure Firebase Auth state listener
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
         const userEmail = (fbUser.email || '').toLowerCase().trim();
@@ -101,7 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(appUser);
         setSession({ user: appUser });
 
-        // Synchronize with database profiles table
+        // Synchronize with database profiles table (Supabase used strictly for database storage)
         try {
           await supabase.from('profiles').upsert({
             id: fbUser.uid,
@@ -122,146 +110,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, [collegeDomain]);
 
-  // Send 6-Digit Numeric OTP to college email
-  const sendDigitOtp = async (email: string) => {
-    const cleanEmail = email.trim().toLowerCase();
-    const expectedDomain = collegeDomain.toLowerCase();
-
-    if (expectedDomain && !cleanEmail.endsWith(`@${expectedDomain}`)) {
-      throw new Error(`Only institutional accounts (@${collegeDomain}) can receive an OTP.`);
-    }
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email: cleanEmail,
-    });
-
-    if (error) {
-      if ((error as any).code === 'over_email_send_rate_limit' || error.message?.includes('rate limit')) {
-        throw new Error('Amrita mail gateway rate limit reached. Please register directly with your mandatory password!');
-      }
-      throw error;
-    }
-  };
-
-  // Verify 6-Digit Numeric OTP and establish authenticated session
-  const verifyDigitOtp = async (email: string, token: string, name?: string, password?: string) => {
-    const cleanEmail = email.trim().toLowerCase();
-    const expectedDomain = collegeDomain.toLowerCase();
-
-    if (expectedDomain && !cleanEmail.endsWith(`@${expectedDomain}`)) {
-      throw new Error(`Only institutional accounts (@${collegeDomain}) are authorized.`);
-    }
-
-    const { data: supaData, error: supaError } = await supabase.auth.verifyOtp({
-      email: cleanEmail,
-      token: token.trim(),
-      type: 'email',
-    });
-
-    if (supaError) {
-      throw supaError;
-    }
-
-    const displayName = name?.trim() || cleanEmail.split('@')[0];
-    const uid = supaData.user?.id || auth.currentUser?.uid || 'user_' + Date.now();
-
-    // Register / Synchronize in Firebase Auth for single account tracking
-    if (isFirebaseConfigured) {
-      const authPassword = password && password.length >= 6 
-        ? password 
-        : `UniMart#${cleanEmail.replace(/[^a-zA-Z0-9]/g, '')}!2026`;
-
-      try {
-        const cred = await createUserWithEmailAndPassword(auth, cleanEmail, authPassword);
-        if (displayName) {
-          await updateProfile(cred.user, { displayName });
-        }
-      } catch (fbErr: any) {
-        if (fbErr.code === 'auth/email-already-in-use') {
-          try {
-            await signInWithEmailAndPassword(auth, cleanEmail, authPassword);
-          } catch {
-            // User already has account and is verified via OTP
-          }
-        }
-      }
-    }
-
-    // Synchronize profile with Supabase database
-    try {
-      await supabase.from('profiles').upsert({
-        id: uid,
-        name: displayName,
-        email: cleanEmail,
-        college_verified: true,
-      }, { onConflict: 'id' });
-    } catch (err) {
-      console.warn('Profile sync:', err);
-    }
-
-    const appUser: AppUser = {
-      id: uid,
-      uid: uid,
-      email: cleanEmail,
-      displayName: displayName,
-      emailVerified: true,
-      college_verified: true,
-      user_metadata: { name: displayName },
-    };
-
-    setUser(appUser);
-    setSession({ user: appUser });
-  };
-
-  const sendOneTimePasswordLink = async (email: string, name?: string) => {
-    const trimmedEmail = email.trim().toLowerCase();
-    const expectedDomain = collegeDomain.toLowerCase();
-
-    if (expectedDomain && !trimmedEmail.endsWith(`@${expectedDomain}`)) {
-      throw new Error(`Only institutional accounts (@${collegeDomain}) can request one-time access.`);
-    }
-
-    const actionCodeSettings = {
-      url: `${window.location.origin}/login?emailLink=true`,
-      handleCodeInApp: true,
-    };
-
-    await sendSignInLinkToEmail(auth, trimmedEmail, actionCodeSettings);
-    window.localStorage.setItem('emailForSignIn', trimmedEmail);
-    if (name?.trim()) {
-      window.localStorage.setItem('nameForSignIn', name.trim());
-    }
-  };
-
-  const completeOneTimePasswordSignIn = async (emailFromInput?: string) => {
-    if (!isSignInWithEmailLink(auth, window.location.href)) {
-      throw new Error('Invalid or expired authentication link.');
-    }
-
-    const email = emailFromInput?.trim().toLowerCase() || window.localStorage.getItem('emailForSignIn')?.toLowerCase();
-
-    if (!email) {
-      throw new Error('EMAIL_REQUIRED');
-    }
-
-    const expectedDomain = collegeDomain.toLowerCase();
-    if (expectedDomain && !email.endsWith(`@${expectedDomain}`)) {
-      throw new Error(`Only institutional accounts (@${collegeDomain}) are authorized.`);
-    }
-
-    const cred = await signInWithEmailLink(auth, email, window.location.href);
-    window.localStorage.removeItem('emailForSignIn');
-
-    const storedName = window.localStorage.getItem('nameForSignIn');
-    if (storedName && cred.user) {
-      await updateProfile(cred.user, { displayName: storedName });
-      window.localStorage.removeItem('nameForSignIn');
-    }
-
-    window.history.replaceState({}, document.title, window.location.pathname);
-    setIsIncomingEmailLink(false);
-  };
-
+  // Pure Firebase Email & Mandatory Password Registration
   const signUpWithEmail = async (email: string, password: string, name: string) => {
     const trimmedEmail = email.trim().toLowerCase();
     const expectedDomain = collegeDomain.toLowerCase();
@@ -274,9 +123,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Password is mandatory and must be at least 6 characters.');
     }
 
+    // 1. Create account directly via Firebase Authentication
     const cred = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
     const displayName = name.trim() || trimmedEmail.split('@')[0];
     
+    // 2. Update Firebase user profile
     if (name.trim()) {
       try {
         await updateProfile(cred.user, { displayName });
@@ -285,7 +136,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    // Synchronize profile with Supabase profiles table
+    // 3. Synchronize user profile into PostgreSQL database
     try {
       await supabase.from('profiles').upsert({
         id: cred.user.uid,
@@ -297,6 +148,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('Profile sync:', profileErr);
     }
 
+    // 4. Update local user state immediately
     const appUser: AppUser = {
       id: cred.user.uid,
       uid: cred.user.uid,
@@ -311,6 +163,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(appUser);
     setSession({ user: appUser });
 
+    // 5. Send Firebase verification email (non-blocking)
     try {
       await sendEmailVerification(cred.user);
     } catch (verifErr) {
@@ -318,6 +171,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Pure Firebase Email & Password Sign In
   const signInWithEmail = async (email: string, password: string) => {
     const trimmedEmail = email.trim().toLowerCase();
     const expectedDomain = collegeDomain.toLowerCase();
@@ -329,6 +183,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await signInWithEmailAndPassword(auth, trimmedEmail, password);
   };
 
+  // Pure Firebase Google SSO with institutional domain check
   const signInWithGoogle = async () => {
     const cred = await signInWithPopup(auth, googleProvider);
     const userEmail = (cred.user.email || '').toLowerCase().trim();
@@ -340,6 +195,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Pure Firebase Password Reset
   const sendPasswordReset = async (email: string) => {
     const trimmedEmail = email.trim().toLowerCase();
     const expectedDomain = collegeDomain.toLowerCase();
@@ -351,9 +207,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await sendPasswordResetEmail(auth, trimmedEmail);
   };
 
+  // Pure Firebase Sign Out
   const signOut = async () => {
     await firebaseSignOut(auth);
-    await supabase.auth.signOut();
     setUser(null);
     setSession(null);
   };
@@ -363,29 +219,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{ 
         session, 
         user, 
+        loading,
         signOut, 
         signInWithEmail, 
         signUpWithEmail, 
-        sendDigitOtp,
-        verifyDigitOtp,
-        sendOneTimePasswordLink,
-        completeOneTimePasswordSignIn,
         signInWithGoogle, 
         sendPasswordReset, 
-        collegeDomain, 
-        loading,
-        isFirebaseReady: isFirebaseConfigured,
-        isIncomingEmailLink
+        collegeDomain,
+        isFirebaseReady: isFirebaseConfigured
       }}
     >
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 };
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
