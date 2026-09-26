@@ -1,0 +1,292 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Ultra-Premium Obsidian & Titanium Studio Palette */
+    --background: 0 0% 0%;       /* Pure Pitch Black #000000 */
+    --foreground: 0 0% 96%;      /* Crisp Off-White #f4f4f6 */
+
+    --card: 240 5% 4%;           /* Deep Carbon #0a0a0d */
+    --card-foreground: 0 0% 96%;
+
+    --popover: 240 5% 4%;
+    --popover-foreground: 0 0% 96%;
+
+    /* Crisp Platinum Action */
+    --primary: 0 0% 100%;        /* Pure Diamond White */
+    --primary-foreground: 0 0% 0%;
+
+    --secondary: 240 4% 9%;      /* #161619 */
+    --secondary-foreground: 0 0% 96%;
+
+    --muted: 240 4% 8%;          /* #121215 */
+    --muted-foreground: 240 5% 58%; /* #93939e */
+
+    --accent: 240 4% 10%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 50.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 4% 11%;        /* Hairline border */
+    --input: 240 4% 11%;
+    --ring: 0 0% 90%;
+
+    --radius: 0.875rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    background-color: #000000;
+    color: #f4f4f6;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Apple Pro Metallic Titanium Sheen Typography */
+.titanium-title {
+  background: linear-gradient(180deg, #ffffff 0%, #e4e4e7 65%, #94a3b8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.titanium-sub {
+  background: linear-gradient(180deg, #d4d4d8 0%, #9ca3af 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Ultra-Premium Luxury Dark Classes */
+.luxury-surface {
+  background: linear-gradient(180deg, rgba(16, 16, 20, 0.95) 0%, rgba(9, 9, 12, 0.95) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 4px 20px -2px rgba(0, 0, 0, 0.8), inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+}
+
+.luxury-surface-interactive {
+  background: linear-gradient(180deg, rgba(15, 15, 19, 0.95) 0%, rgba(9, 9, 12, 0.95) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 4px 16px -2px rgba(0, 0, 0, 0.7), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.luxury-surface-interactive:hover {
+  transform: translateY(-2px);
+  background: linear-gradient(180deg, rgba(22, 22, 28, 0.98) 0%, rgba(13, 13, 17, 0.98) 100%);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 30px -4px rgba(255, 255, 255, 0.05), 0 16px 36px -6px rgba(0, 0, 0, 0.95), inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+}
+
+.luxury-surface-interactive:active {
+  transform: translateY(0);
+}
+
+.luxury-inset {
+  background-color: #050507;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.85), 0 1px 0 0 rgba(255, 255, 255, 0.04);
+}
+
+.luxury-inset-sm {
+  background-color: #07070a;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1.5px 3px 0 rgba(0, 0, 0, 0.7);
+}
+
+.luxury-pill {
+  background-color: #121216;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: all 0.15s ease;
+}
+
+.luxury-pill:hover {
+  background-color: #191920;
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.luxury-pill-active {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  font-weight: 600 !important;
+  border-color: #ffffff !important;
+  box-shadow: 0 2px 12px rgba(255, 255, 255, 0.25) !important;
+}
+
+/* Platinum Diamond Action Button */
+.luxury-btn-white {
+  background: linear-gradient(180deg, #ffffff 0%, #ececef 100%);
+  color: #000000;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 20px rgba(255, 255, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 1);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.luxury-btn-white:hover {
+  background: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5), 0 0 25px rgba(255, 255, 255, 0.22);
+}
+
+.luxury-btn-white:active {
+  transform: scale(0.98);
+  background: #e4e4e7;
+}
+
+/* Precision Hardware Secondary Button */
+.luxury-btn-ghost {
+  background: linear-gradient(180deg, rgba(22, 22, 26, 0.9) 0%, rgba(14, 14, 18, 0.9) 100%);
+  color: #ededed;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.luxury-btn-ghost:hover {
+  background: linear-gradient(180deg, rgba(30, 30, 36, 0.95) 0%, rgba(18, 18, 22, 0.95) 100%);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.luxury-btn-ghost:active {
+  transform: scale(0.98);
+  background: #0d0d10;
+}
+
+/* Apple Pro Frosted Glass Floating Dock */
+.luxury-dock {
+  background: rgba(8, 8, 10, 0.78);
+  backdrop-filter: blur(28px) saturate(200%);
+  -webkit-backdrop-filter: blur(28px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 48px -8px rgba(0, 0, 0, 0.9), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+}
+
+/* Subtle luxury glow indicator */
+.pulse-indicator {
+  position: relative;
+}
+.pulse-indicator::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.4);
+  animation: pulse-ring 2s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+/* Luxury Dark Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #000000;
+}
+::-webkit-scrollbar-thumb {
+  background: #222227;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a44;
+}
+
+/* Ambient Background Animations (Apple & Vercel Stealth Dynamic Gradients) */
+@keyframes ambient-drift-1 {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: 0.22;
+  }
+  33% {
+    transform: translate(35px, -25px) scale(1.1);
+    opacity: 0.32;
+  }
+  66% {
+    transform: translate(-30px, 20px) scale(0.94);
+    opacity: 0.18;
+  }
+}
+
+@keyframes ambient-drift-2 {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: 0.18;
+  }
+  40% {
+    transform: translate(-40px, 30px) scale(1.12);
+    opacity: 0.28;
+  }
+  75% {
+    transform: translate(30px, -20px) scale(0.92);
+    opacity: 0.15;
+  }
+}
+
+@keyframes ambient-pulse-glow {
+  0%, 100% {
+    opacity: 0.3;
+    transform: translate(-50%, 0) scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: translate(-50%, 0) scale(1.08);
+  }
+}
+
+@keyframes beam-shimmer {
+  0% {
+    transform: translateX(-150%);
+  }
+  100% {
+    transform: translateX(150%);
+  }
+}
+
+@keyframes grid-breath {
+  0%, 100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.65;
+  }
+}
+
+.animate-ambient-1 {
+  animation: ambient-drift-1 16s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-ambient-2 {
+  animation: ambient-drift-2 19s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-pulse-glow {
+  animation: ambient-pulse-glow 7s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-beam-shimmer {
+  animation: beam-shimmer 4.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.animate-grid-breath {
+  animation: grid-breath 10s ease-in-out infinite;
+}
+
